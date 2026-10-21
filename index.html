@@ -451,12 +451,14 @@ a { color: var(--color-link, var(--color-primary)); }</style>
     <button class="btn sec" id="testBtn">▶ Test Sound</button>
     <label class="switch"><input type="checkbox" id="soundChk" checked=""> Sound</label>
     <label class="switch"><input type="checkbox" id="notifChk" checked=""> Notification</label>
+    <label class="switch"><input type="checkbox" id="wakeChk" checked=""> Keep screen on</label>
     <span style="flex:1"></span>
     <label class="btn sec" style="padding:8px 12px">🎵 Upload Tone
       <input type="file" id="toneFile" accept="audio/*" style="display:none">
     </label>
   </div>
   <div class="status" id="status">Built-in adhan (Alafasy) loaded. Click “Enable Alerts” to start.</div>
+  <div class="status" id="wakeStatus" style="margin-top:-8px">Keep-screen-on ready — activates when you enable alerts.</div>
 
   <!-- PASTE BOX -->
   <details class="paste" id="pasteBox">
@@ -624,13 +626,28 @@ function tick(){const now=new Date();
   document.querySelectorAll('#todayRow .p').forEach((p,i)=>{const t=prayerDate(day,row[2+i]);
     p.classList.toggle('passed',now>t);p.classList.toggle('next',next&&next.name===PRAYERS[i]&&next.when.getDate()===day&&next.when.getMonth()===MONTH-1);});}
 
+/* ---------- screen wake lock ---------- */
+let wakeLock=null;
+async function requestWake(){
+  if(!el('wakeChk').checked) return;
+  if(!('wakeLock' in navigator)){el('wakeStatus').textContent='Keep-screen-on not supported in this browser.';return;}
+  try{wakeLock=await navigator.wakeLock.request('screen');
+    el('wakeStatus').innerHTML='🖥️ Screen will stay <b>ON</b> while this tab is visible.';
+    wakeLock.addEventListener('release',()=>{el('wakeStatus').textContent='Screen lock released (tab hidden or screen locked).';});
+  }catch(e){el('wakeStatus').textContent='Could not keep screen on: '+e.message;}
+}
+async function releaseWake(){try{if(wakeLock){await wakeLock.release();wakeLock=null;}}catch(e){}}
+// re-acquire when the tab becomes visible again (locks auto-release on hide)
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&enabled&&el('wakeChk').checked)requestWake();});
+el('wakeChk').addEventListener('change',()=>{if(el('wakeChk').checked){if(enabled)requestWake();}else releaseWake();});
+
 /* ---------- wiring ---------- */
 el('enableBtn').onclick=async()=>{enabled=true;
   try{audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch(e){}
   if('Notification'in window&&Notification.permission!=='granted'){try{await Notification.requestPermission();}catch(e){}}
   const now=new Date();EVENTS.forEach(e=>{if(e.when<now)firedKeys.add(e.when.getTime());});
   el('status').innerHTML='Alerts <b>ON</b> — notified at each prayer time. Keep this tab open.';
-  el('enableBtn').textContent='✅ Alerts Enabled';};
+  el('enableBtn').textContent='✅ Alerts Enabled';requestWake();};
 el('testBtn').onclick=()=>{try{audioCtx=audioCtx||new(window.AudioContext||window.webkitAudioContext)();audioCtx.resume();}catch(e){}el('status').textContent='▶ Playing test tone…';playTone((res)=>{if(res==='ok')el('status').innerHTML='▶ Test tone played (<b>built-in adhan</b>).';else if(res==='muted')el('status').innerHTML='Sound is <b style="color:var(--red)">OFF</b> — tick the Sound box.';else if(res==='blocked')el('status').innerHTML='⚠ Browser blocked audio. Click anywhere on the page, then press Test again. (If viewing inside a preview, open the file directly in your browser.)';else el('status').textContent='▶ Test played (fallback chime).';});notify('🔔 Test','This is how your prayer alert will look.');};
 el('toneFile').onchange=e=>{const f=e.target.files[0];if(!f)return;if(customTone)URL.revokeObjectURL(customTone);customTone=URL.createObjectURL(f);el('status').innerHTML='Custom tone loaded: <b>'+f.name+'</b>';};
 el('loadBtn').onclick=()=>{const msg=el('parseMsg');try{
